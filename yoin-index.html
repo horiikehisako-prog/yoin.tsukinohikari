@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#2F4F4F" />
+<title>余韻 売上管理</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;700&family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+<style>
+  :root {
+    --ink: #1f2a2a;
+    --bar: #2F4F4F;
+    --bar-dark: #1f3838;
+    --gold: #C9A14A;
+    --gold-soft: #e3c684;
+    --cream: #faf7f1;
+    --paper: #ffffff;
+    --line: #ece6d8;
+    --muted: #8b8576;
+  }
+  html, body { background: var(--cream); }
+  body {
+    font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--ink);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-serif { font-family: "Noto Serif JP", serif; }
+  .font-num   { font-family: "Inter", "Noto Sans JP", sans-serif; font-feature-settings: "tnum"; }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; }
+
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  }
+  .card-header {
+    border-bottom: 1px solid var(--line);
+    padding: 12px 16px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .paper-bg {
+    background-image: radial-gradient(rgba(201,161,74,0.04) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  button { transition: transform .08s ease, background-color .15s ease, opacity .15s ease; }
+  button:active:not(:disabled) { transform: scale(0.96); }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .fade-up { animation: fadeUp .25s ease both; }
+
+  .counter-input {
+    width: 56px; height: 40px; text-align: center;
+    border: 1px solid var(--line); border-radius: 10px;
+    font-weight: 700; font-size: 18px; background: #fff;
+    font-feature-settings: "tnum";
+  }
+  .counter-input:focus { outline: 2px solid var(--gold-soft); border-color: var(--gold); }
+
+  .field-input {
+    width: 100%; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 8px;
+    font-size: 14px; background: #fff;
+  }
+  .field-input:focus { outline: 2px solid var(--gold-soft); border-color: var(--gold); }
+  .field-num { font-feature-settings: "tnum"; text-align: right; }
+</style>
+</head>
+<body class="paper-bg">
+<div id="root" class="px-2"><p class="text-center text-stone-400 py-20">読み込み中...</p></div>
+
+<script>
+// ============================================================
+// Firebase 設定
+// Hisako: 既存の concierge-shift-9f7ac のFirebase config をそのまま貼り付け
+// （Firebase Console → プロジェクト設定 → マイアプリ → 構成）
+// ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyAsr14o8ftu-9E-x1ZT89TUFThqK1FKUnc",
+  authDomain: "concierge-shift-9f7ac.firebaseapp.com",
+  databaseURL: "https://concierge-shift-9f7ac-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "concierge-shift-9f7ac",
+  storageBucket: "concierge-shift-9f7ac.firebasestorage.app",
+  messagingSenderId: "681424729912",
+  appId: "1:681424729912:web:82402cc6df374486eab3cd"
+};
+firebase.initializeApp(firebaseConfig);
+window.db = firebase.database();
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+// ============================================================
+// 設定（必要に応じて変更）
+// ============================================================
+const EDIT_PASSWORD        = "yoin"; // 編集モードのパスワード（変更推奨）
+const DEFAULT_RENT_PER_DAY = 3500;   // 初回起動時の1日あたり家賃（以降はアプリ内で変更可）
+const DEFAULT_TAX_RATE     = 0.10;   // 初回起動時の消費税率（以降はアプリ内で変更可）
+
+// 初回起動時にFirebaseに投入される初期メニュー（以降はアプリ内で編集可）
+const DEFAULT_DRINKS = [
+  { name: "生ビール",                sellPrice: 800,  cost: 236 },
+  { name: "コロナビール",            sellPrice: 900,  cost: 280 },
+  { name: "ハイボール",              sellPrice: 800,  cost: 250 },
+  { name: "ウイスキーロック（CROW）", sellPrice: 800,  cost: 220 },
+  { name: "麦炭酸",                  sellPrice: 700,  cost: 180 },
+  { name: "芋炭酸",                  sellPrice: 700,  cost: 180 },
+  { name: "麦ロック",                sellPrice: 700,  cost: 200 },
+  { name: "芋ロック",                sellPrice: 800,  cost: 200 },
+  { name: "生レモン",                sellPrice: 700,  cost: 150 },
+  { name: "日本酒",                  sellPrice: 800,  cost: 200 },
+  { name: "1合",                     sellPrice: 1000, cost: 350 },
+  { name: "熱燗",                    sellPrice: 1000, cost: 350 },
+  { name: "翠",                      sellPrice: 800,  cost: 150 },
+  { name: "梅酒",                    sellPrice: 800,  cost: 150 },
+  { name: "柚子酒",                  sellPrice: 800,  cost: 150 },
+  { name: "カシスオレンジ",          sellPrice: 800,  cost: 150 },
+  { name: "カシスソーダ",            sellPrice: 800,  cost: 120 },
+  { name: "ワイン赤・白",            sellPrice: 4500, cost: 1320 },
+  { name: "Talo",                    sellPrice: 5000, cost: 1562 },
+  { name: "ジンジャエール",          sellPrice: 500,  cost: 105 },
+  { name: "ウーロン",                sellPrice: 400,  cost: 20 },
+  { name: "オレンジジュース",        sellPrice: 500,  cost: 105 },
+  { name: "コーラ",                  sellPrice: 500,  cost: 105 },
+  { name: "フリー",                  sellPrice: 600,  cost: 164 },
+  { name: "ノンアルカシスオレ",      sellPrice: 600,  cost: 106 },
+  { name: "シャルドネスパークリング", sellPrice: 600,  cost: 106 },
+];
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+const fmtYen = (n) => `¥${(n || 0).toLocaleString()}`;
+const fmtJpDate = (iso) => {
+  if (!iso) return "日付未設定";
+  const p = iso.split("-");
+  if (p.length !== 3) return iso;
+  return `${parseInt(p[1])}月${parseInt(p[2])}日`;
+};
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+};
+
+// ============================================================
+// App
+// ============================================================
+function App() {
+  const today = new Date();
+  const [year,  setYear]  = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [editMode, setEditMode] = useState(
+    () => sessionStorage.getItem("yoin_edit") === "on"
+  );
+  const [view, setView] = useState({ type: "month" });
+  const [monthData, setMonthData] = useState(null);
+  const [drinks, setDrinks] = useState([]);
+  const [drinksReady, setDrinksReady] = useState(false);
+  const [settings, setSettings] = useState({
+    rentPerDay: DEFAULT_RENT_PER_DAY,
+    taxRate:    DEFAULT_TAX_RATE,
+  });
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+
+  // ----- Drinks マスター（Firebaseから） -----
+  useEffect(() => {
+    const r = db.ref("yoin-sales/config/drinks");
+    const cb = (snap) => {
+      const data = snap.val();
+      if (!data || Object.keys(data).length === 0) {
+        // 初回起動: 初期メニューを投入
+        const seed = {};
+        DEFAULT_DRINKS.forEach((d, i) => {
+          const id = db.ref("yoin-sales/config/drinks").push().key;
+          seed[id] = { ...d, order: i };
+        });
+        db.ref("yoin-sales/config/drinks").set(seed);
+        // 投入後、再度この cb が呼ばれる
+        return;
+      }
+      const list = Object.entries(data)
+        .map(([id, d]) => ({
+          id,
+          name: d.name || "",
+          sellPrice: Number(d.sellPrice) || 0,
+          cost: Number(d.cost) || 0,
+          order: Number(d.order) || 0,
+        }))
+        .sort((a, b) => a.order - b.order);
+      setDrinks(list);
+      setDrinksReady(true);
+    };
+    r.on("value", cb);
+    return () => r.off("value", cb);
+  }, []);
+
+  // ----- 計算設定（家賃・消費税率） -----
+  useEffect(() => {
+    const r = db.ref("yoin-sales/config/settings");
+    const cb = (snap) => {
+      const data = snap.val();
+      if (!data) {
+        // 初回起動: デフォルトを投入
+        db.ref("yoin-sales/config/settings").set({
+          rentPerDay: DEFAULT_RENT_PER_DAY,
+          taxRate:    DEFAULT_TAX_RATE,
+        });
+        return;
+      }
+      setSettings({
+        rentPerDay: Number(data.rentPerDay) >= 0 ? Number(data.rentPerDay) : DEFAULT_RENT_PER_DAY,
+        taxRate:    Number(data.taxRate)    >= 0 ? Number(data.taxRate)    : DEFAULT_TAX_RATE,
+      });
+      setSettingsReady(true);
+    };
+    r.on("value", cb);
+    return () => r.off("value", cb);
+  }, []);
+
+  // ----- 月データ -----
+  useEffect(() => {
+    setLoading(true);
+    const r = db.ref(`yoin-sales/months/${monthKey}`);
+    const cb = (snap) => {
+      setMonthData(snap.val() || { days: {} });
+      setLoading(false);
+    };
+    r.on("value", cb);
+    return () => r.off("value", cb);
+  }, [monthKey]);
+
+  const toggleEditMode = () => {
+    if (editMode) {
+      setEditMode(false);
+      sessionStorage.removeItem("yoin_edit");
+      return;
+    }
+    const pw = window.prompt("編集モードのパスワードを入力してください");
+    if (pw === null) return;
+    if (pw === EDIT_PASSWORD) {
+      setEditMode(true);
+      sessionStorage.setItem("yoin_edit", "on");
+    } else {
+      window.alert("パスワードが違います");
+    }
+  };
+
+  const days = (monthData && monthData.days) || {};
+  const dayList = Object.entries(days)
+    .map(([id, d]) => ({ id, date: (d && d.date) || "", cups: (d && d.cups) || {} }))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  // 計算（drinks マスターを参照）
+  const calcDayCost = (day) =>
+    drinks.reduce((s, d) => s + (day.cups[d.id] || 0) * d.cost, 0);
+
+  const businessDays = dayList.length;
+  const drinksCost   = dayList.reduce((s, day) => s + calcDayCost(day), 0);
+  const rent         = businessDays * settings.rentPerDay;
+  const subtotal     = drinksCost + rent;
+  const total        = subtotal === 0 ? 0 : Math.ceil(subtotal * (1 + settings.taxRate));
+  const tax          = total - subtotal;
+
+  const prevMonth = () => {
+    if (month === 1) { setYear((y) => y - 1); setMonth(12); }
+    else setMonth((m) => m - 1);
+  };
+  const nextMonth = () => {
+    if (month === 12) { setYear((y) => y + 1); setMonth(1); }
+    else setMonth((m) => m + 1);
+  };
+
+  // ----- 月データ ミューテーション -----
+  const addDay = async () => {
+    const newRef = db.ref(`yoin-sales/months/${monthKey}/days`).push();
+    await newRef.set({ date: todayISO(), cups: {} });
+    setView({ type: "day", dayId: newRef.key });
+  };
+  const updateDayDate = async (dayId, date) => {
+    await db.ref(`yoin-sales/months/${monthKey}/days/${dayId}/date`).set(date);
+  };
+  const updateCups = async (dayId, drinkId, value) => {
+    const path = `yoin-sales/months/${monthKey}/days/${dayId}/cups/${drinkId}`;
+    if (!value || value <= 0) await db.ref(path).remove();
+    else                       await db.ref(path).set(value);
+  };
+  const deleteDay = async (dayId) => {
+    if (!window.confirm("この日のデータを削除します。よろしいですか?")) return;
+    await db.ref(`yoin-sales/months/${monthKey}/days/${dayId}`).remove();
+    setView({ type: "month" });
+  };
+
+  // ----- ドリンクマスター ミューテーション -----
+  const updateDrink = async (id, patch) => {
+    await db.ref(`yoin-sales/config/drinks/${id}`).update(patch);
+  };
+  const addDrink = async ({ name, sellPrice, cost }) => {
+    const newRef = db.ref("yoin-sales/config/drinks").push();
+    const maxOrder = drinks.reduce((m, d) => Math.max(m, d.order || 0), 0);
+    await newRef.set({
+      name: name || "新しいドリンク",
+      sellPrice: Number(sellPrice) || 0,
+      cost: Number(cost) || 0,
+      order: maxOrder + 1,
+    });
+  };
+  const deleteDrink = async (id) => {
+    const drink = drinks.find((d) => d.id === id);
+    if (!drink) return;
+    if (!window.confirm(`「${drink.name}」を削除します。よろしいですか?`)) return;
+    await db.ref(`yoin-sales/config/drinks/${id}`).remove();
+  };
+
+  // ----- 計算設定 ミューテーション -----
+  const updateSettings = async (patch) => {
+    await db.ref("yoin-sales/config/settings").update(patch);
+  };
+
+  return (
+    <div className="min-h-screen pb-24 max-w-xl mx-auto">
+      <Header
+        editMode={editMode}
+        onToggle={toggleEditMode}
+        showSettings={editMode}
+        onSettings={() => setView({ type: "settings" })}
+        showBackToMonth={view.type === "settings"}
+        onBackToMonth={() => setView({ type: "month" })}
+      />
+
+      {(loading || !drinksReady || !settingsReady) ? (
+        <p className="text-center text-stone-400 py-20">読み込み中...</p>
+      ) : view.type === "settings" ? (
+        <SettingsView
+          drinks={drinks}
+          settings={settings}
+          onUpdate={updateDrink}
+          onAdd={addDrink}
+          onDelete={deleteDrink}
+          onUpdateSettings={updateSettings}
+          onBack={() => setView({ type: "month" })}
+        />
+      ) : view.type === "month" ? (
+        <MonthView
+          year={year} month={month}
+          prevMonth={prevMonth} nextMonth={nextMonth}
+          drinks={drinks}
+          settings={settings}
+          dayList={dayList}
+          businessDays={businessDays}
+          drinksCost={drinksCost}
+          rent={rent}
+          subtotal={subtotal}
+          tax={tax}
+          total={total}
+          editMode={editMode}
+          onAddDay={addDay}
+          onEditDay={(id) => setView({ type: "day", dayId: id })}
+        />
+      ) : (
+        <DayView
+          drinks={drinks}
+          day={dayList.find((d) => d.id === view.dayId)}
+          editMode={editMode}
+          onBack={() => setView({ type: "month" })}
+          onDateChange={(d) => updateDayDate(view.dayId, d)}
+          onCupsChange={(drinkId, v) => updateCups(view.dayId, drinkId, v)}
+          onDelete={() => deleteDay(view.dayId)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Header
+// ============================================================
+function Header({ editMode, onToggle, showSettings, onSettings }) {
+  return (
+    <header
+      className="text-white px-5 py-4 sticky top-0 z-10"
+      style={{
+        background: "linear-gradient(180deg, var(--bar) 0%, var(--bar-dark) 100%)",
+        boxShadow: "0 1px 0 rgba(0,0,0,0.15)",
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-serif text-xl tracking-widest leading-none">余韻</p>
+          <p className="text-[10px] text-stone-300 mt-1 tracking-[0.25em]">
+            ツキノヒカリ お支払い計算表
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {showSettings && (
+            <button
+              onClick={onSettings}
+              className="text-[11px] px-3 py-1.5 rounded-full font-bold tracking-wider"
+              style={{
+                background: "rgba(255,255,255,0.1)",
+                color: "#e7e3d6",
+                border: "1px solid rgba(255,255,255,0.15)",
+              }}
+            >
+              ⚙ 設定
+            </button>
+          )}
+          <button
+            onClick={onToggle}
+            className="text-[11px] px-3 py-1.5 rounded-full font-bold tracking-wider"
+            style={
+              editMode
+                ? { background: "var(--gold)", color: "#1f2a2a" }
+                : { background: "rgba(255,255,255,0.1)", color: "#e7e3d6", border: "1px solid rgba(255,255,255,0.15)" }
+            }
+          >
+            {editMode ? "編集中" : "閲覧中"}
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// ============================================================
+// MonthView
+// ============================================================
+function MonthView({
+  year, month, prevMonth, nextMonth,
+  drinks, settings, dayList,
+  businessDays, drinksCost, rent, subtotal, tax, total,
+  editMode, onAddDay, onEditDay,
+}) {
+  const drinkTotals = useMemo(
+    () =>
+      drinks
+        .map((d) => {
+          const cups = dayList.reduce((s, day) => s + (day.cups[d.id] || 0), 0);
+          return { ...d, cups, subtotal: cups * d.cost };
+        })
+        .filter((d) => d.cups > 0),
+    [drinks, dayList]
+  );
+
+  return (
+    <div className="px-4 pt-4 space-y-4 fade-up">
+      {/* 年月切替 */}
+      <div className="card flex items-center justify-between px-2 py-2">
+        <button onClick={prevMonth}
+                className="w-12 h-12 text-stone-500 text-xl font-light">←</button>
+        <div className="text-center">
+          <p className="text-[10px] text-stone-500 tracking-[0.25em]">対象月</p>
+          <p className="font-serif text-2xl mt-1 leading-none">
+            <span className="font-num">{year}</span>
+            <span className="text-base mx-0.5 text-stone-500">年</span>
+            <span className="font-num">{month}</span>
+            <span className="text-base ml-0.5 text-stone-500">月</span>
+          </p>
+        </div>
+        <button onClick={nextMonth}
+                className="w-12 h-12 text-stone-500 text-xl font-light">→</button>
+      </div>
+
+      {/* 合計カード */}
+      <div
+        className="rounded-2xl p-6 text-white relative overflow-hidden"
+        style={{
+          background: "linear-gradient(135deg, #b88a3b 0%, var(--gold) 60%, #d9b663 100%)",
+          boxShadow: "0 10px 30px -10px rgba(180,140,60,0.4)",
+        }}
+      >
+        <p className="text-[10px] tracking-[0.3em] opacity-90">
+          ツキノヒカリへ お支払い合計
+        </p>
+        <p className="font-num text-4xl font-bold mt-2 tracking-tight">
+          {fmtYen(total)}
+        </p>
+        <p className="text-[10px] opacity-80 mt-2 tracking-wider">
+          税込 ・ 1円単位切り上げ
+        </p>
+        <div
+          className="absolute -right-8 -bottom-8 w-32 h-32 rounded-full"
+          style={{ background: "rgba(255,255,255,0.08)" }}
+        />
+      </div>
+
+      {/* 内訳 */}
+      <div className="card overflow-hidden">
+        <div className="card-header">内訳</div>
+        <Row label="営業日数" value={`${businessDays} 日`} />
+        <Row label="飲み物 原価合計" value={fmtYen(drinksCost)} />
+        <Row label={`家賃 ( ${businessDays}日 × ${fmtYen(settings.rentPerDay)} )`} value={fmtYen(rent)} />
+        <Row label="小計（税抜）" value={fmtYen(subtotal)} strong />
+        <Row label={`消費税（${Math.round(settings.taxRate * 100)}%）`} value={fmtYen(tax)} />
+        <Row label="お支払い合計（税込）" value={fmtYen(total)} strong highlight />
+      </div>
+
+      {/* 営業日リスト */}
+      <div className="card overflow-hidden">
+        <div className="card-header flex items-center justify-between">
+          <span>営業日</span>
+          <span className="text-stone-400 font-num">{dayList.length} 日</span>
+        </div>
+        {dayList.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-stone-400">
+            {editMode
+              ? "下の「営業日を追加」から開店日の売上を入力してください"
+              : "まだ営業日が登録されていません"}
+          </p>
+        ) : (
+          <ul>
+            {dayList.map((day, i) => {
+              const dayCost = drinks.reduce((s, d) => s + (day.cups[d.id] || 0) * d.cost, 0);
+              const dayCups = Object.values(day.cups).reduce((s, n) => s + (n || 0), 0);
+              return (
+                <li
+                  key={day.id}
+                  className="flex items-center justify-between px-4 py-3"
+                  style={{ borderTop: i === 0 ? "none" : "1px solid var(--line)" }}
+                >
+                  <div className="flex-1 min-w-0 pr-3">
+                    <p className="font-serif text-lg leading-tight">{fmtJpDate(day.date)}</p>
+                    <p className="text-xs text-stone-500 mt-0.5 font-num">
+                      {dayCups} 杯　/　{fmtYen(dayCost)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => onEditDay(day.id)}
+                    className="text-xs px-3 py-2 rounded-lg font-bold tracking-wider"
+                    style={{
+                      background: editMode ? "var(--bar)" : "var(--cream)",
+                      color: editMode ? "#fff" : "var(--bar)",
+                      border: editMode ? "none" : "1px solid var(--line)",
+                    }}
+                  >
+                    {editMode ? "編集 →" : "詳細 →"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {editMode && (
+          <div className="px-3 py-3" style={{ borderTop: "1px solid var(--line)" }}>
+            <button
+              onClick={onAddDay}
+              className="w-full py-3 rounded-xl font-bold tracking-wider"
+              style={{
+                background: "var(--gold)",
+                color: "#1f2a2a",
+                boxShadow: "0 4px 12px -4px rgba(201,161,74,0.5)",
+              }}
+            >
+              + 営業日を追加
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 月別 ドリンク内訳 */}
+      {drinkTotals.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="card-header">月別 ドリンク内訳</div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] text-stone-400 tracking-wider">
+                <th className="text-left px-4 py-2 font-medium">品目</th>
+                <th className="text-right px-2 py-2 font-medium">原価</th>
+                <th className="text-right px-2 py-2 font-medium">杯数</th>
+                <th className="text-right px-4 py-2 font-medium">小計</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drinkTotals.map((d) => (
+                <tr key={d.id} style={{ borderTop: "1px solid var(--line)" }}>
+                  <td className="px-4 py-2.5">{d.name}</td>
+                  <td className="text-right px-2 py-2.5 font-num text-stone-500">{fmtYen(d.cost)}</td>
+                  <td className="text-right px-2 py-2.5 font-num">{d.cups}</td>
+                  <td className="text-right px-4 py-2.5 font-num font-bold">{fmtYen(d.subtotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 説明 */}
+      <div
+        className="rounded-xl p-4 text-[11px] leading-relaxed space-y-1.5"
+        style={{ background: "rgba(201,161,74,0.05)", border: "1px solid rgba(201,161,74,0.15)", color: "#6b5f45" }}
+      >
+        <p>
+          ※ 営業日数は登録日数で自動集計します。お支払い合計は、飲み物原価＋家賃（1日 {fmtYen(settings.rentPerDay)}）に消費税（{Math.round(settings.taxRate * 100)}%）を加え、1円単位で切り上げています。
+        </p>
+        <p>
+          ※ ミード・コーヒー・紅茶は当方（余韻）で用意しているため、この表には含めていません。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value, strong, highlight }) {
+  return (
+    <div
+      className="flex items-center justify-between px-4 py-3"
+      style={{
+        borderTop: "1px solid var(--line)",
+        background: highlight ? "rgba(201,161,74,0.08)" : "transparent",
+      }}
+    >
+      <span
+        className="text-sm"
+        style={{ color: strong ? "var(--ink)" : "var(--muted)", fontWeight: strong ? 700 : 500 }}
+      >
+        {label}
+      </span>
+      <span
+        className="font-num"
+        style={{
+          color: highlight ? "#8a6520" : "var(--ink)",
+          fontSize: highlight ? "18px" : "15px",
+          fontWeight: strong ? 700 : 500,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// ============================================================
+// DayView
+// ============================================================
+function DayView({ drinks, day, editMode, onBack, onDateChange, onCupsChange, onDelete }) {
+  if (!day) {
+    return (
+      <div className="px-4 pt-4 fade-up">
+        <button onClick={onBack} className="text-sm text-stone-700 mb-6">← 月の集計に戻る</button>
+        <p className="text-center text-stone-400 mt-12">この日は削除されました</p>
+      </div>
+    );
+  }
+  const dayCost = drinks.reduce((s, d) => s + (day.cups[d.id] || 0) * d.cost, 0);
+  const dayCups = Object.values(day.cups).reduce((s, n) => s + (n || 0), 0);
+  const visibleDrinks = editMode
+    ? drinks
+    : drinks.filter((d) => (day.cups[d.id] || 0) > 0);
+
+  return (
+    <div className="px-4 pt-4 space-y-4 fade-up">
+      <button onClick={onBack} className="text-sm text-stone-700">← 月の集計に戻る</button>
+
+      <div className="card px-5 py-4">
+        <p className="text-[10px] text-stone-500 tracking-[0.25em] mb-1">営業日</p>
+        {editMode ? (
+          <input
+            type="date"
+            value={day.date || ""}
+            onChange={(e) => onDateChange(e.target.value)}
+            className="font-serif text-2xl w-full outline-none bg-transparent"
+            style={{ color: "var(--ink)" }}
+          />
+        ) : (
+          <p className="font-serif text-2xl" style={{ color: "var(--ink)" }}>
+            {fmtJpDate(day.date)}
+          </p>
+        )}
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="card-header flex items-center justify-between">
+          <span>{editMode ? "杯数を入力" : "提供したドリンク"}</span>
+          <span className="text-stone-400 font-num">{dayCups} 杯</span>
+        </div>
+        {visibleDrinks.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-stone-400">
+            この日のドリンク記録はありません
+          </p>
+        ) : (
+          <ul>
+            {visibleDrinks.map((d, i) => (
+              <DrinkRow
+                key={d.id}
+                drink={d}
+                value={day.cups[d.id] || 0}
+                editMode={editMode}
+                first={i === 0}
+                onChange={(v) => onCupsChange(d.id, v)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div
+        className="rounded-xl p-4 text-white"
+        style={{ background: "linear-gradient(135deg, var(--bar) 0%, var(--bar-dark) 100%)" }}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-xs tracking-[0.25em] opacity-90">この日の原価小計</span>
+          <span className="font-num text-2xl font-bold">{fmtYen(dayCost)}</span>
+        </div>
+      </div>
+
+      {editMode && (
+        <button
+          onClick={onDelete}
+          className="w-full py-3 rounded-xl text-sm font-medium"
+          style={{ background: "#fff", color: "#b04040", border: "1px solid #ecd4d4" }}
+        >
+          この日を削除
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DrinkRow({ drink, value, editMode, first, onChange }) {
+  const dec = () => onChange(Math.max(0, (value || 0) - 1));
+  const inc = () => onChange((value || 0) + 1);
+  return (
+    <li
+      className="flex items-center justify-between px-3 py-2.5"
+      style={{
+        borderTop: first ? "none" : "1px solid var(--line)",
+        background: value > 0 ? "rgba(201,161,74,0.04)" : "transparent",
+      }}
+    >
+      <div className="flex-1 min-w-0 pr-2">
+        <p className="text-sm font-medium leading-tight">{drink.name}</p>
+        <p className="text-[11px] text-stone-500 mt-0.5 font-num">
+          原価 {fmtYen(drink.cost)}
+        </p>
+      </div>
+      {editMode ? (
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={dec}
+            disabled={!value}
+            className="w-10 h-10 rounded-full font-bold text-lg flex items-center justify-center"
+            style={{
+              background: value ? "#efe9d9" : "#f5f1e6",
+              color: value ? "var(--ink)" : "#cdc6b3",
+            }}
+          >−</button>
+          <input
+            type="number" inputMode="numeric" pattern="[0-9]*"
+            value={value || 0}
+            onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+            className="counter-input"
+          />
+          <button
+            onClick={inc}
+            className="w-10 h-10 rounded-full font-bold text-lg flex items-center justify-center text-white"
+            style={{ background: "var(--gold)" }}
+          >+</button>
+        </div>
+      ) : (
+        <span className="font-num text-xl font-bold">{value}</span>
+      )}
+    </li>
+  );
+}
+
+// ============================================================
+// SettingsView ― ドリンク（メニュー）編集
+// ============================================================
+function SettingsView({ drinks, settings, onUpdate, onAdd, onDelete, onUpdateSettings, onBack }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [newDrink, setNewDrink] = useState({ name: "", sellPrice: "", cost: "" });
+
+  const submitNew = async () => {
+    if (!newDrink.name.trim()) {
+      window.alert("品名を入力してください");
+      return;
+    }
+    await onAdd({
+      name: newDrink.name.trim(),
+      sellPrice: parseInt(newDrink.sellPrice) || 0,
+      cost: parseInt(newDrink.cost) || 0,
+    });
+    setNewDrink({ name: "", sellPrice: "", cost: "" });
+    setShowAdd(false);
+  };
+
+  return (
+    <div className="px-4 pt-4 space-y-4 fade-up">
+      <button onClick={onBack} className="text-sm text-stone-700">← 月の集計に戻る</button>
+
+      <div>
+        <p className="font-serif text-2xl">設定</p>
+        <p className="text-xs text-stone-500 mt-1">
+          各項目を直接タップして編集できます。変更は自動保存されます。
+        </p>
+      </div>
+
+      {/* 計算設定 */}
+      <div className="card overflow-hidden">
+        <div className="card-header">計算設定</div>
+        <SettingsEditRow
+          first
+          label="1日あたり家賃"
+          suffix="円"
+          value={settings.rentPerDay}
+          onSave={(v) => onUpdateSettings({ rentPerDay: v })}
+        />
+        <SettingsEditRow
+          label="消費税率"
+          suffix="％"
+          value={Math.round(settings.taxRate * 100)}
+          onSave={(v) => onUpdateSettings({ taxRate: v / 100 })}
+        />
+      </div>
+
+      {/* ドリンク一覧 */}
+      <div className="card overflow-hidden">
+        <div className="card-header flex items-center justify-between">
+          <span>ドリンク一覧</span>
+          <span className="text-stone-400 font-num">{drinks.length} 品</span>
+        </div>
+        {drinks.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-stone-400">
+            ドリンクが登録されていません
+          </p>
+        ) : (
+          <ul>
+            {drinks.map((d, i) => (
+              <DrinkEditRow
+                key={d.id}
+                drink={d}
+                first={i === 0}
+                onUpdate={(patch) => onUpdate(d.id, patch)}
+                onDelete={() => onDelete(d.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* 追加 */}
+      {showAdd ? (
+        <div className="card p-4 space-y-3">
+          <p className="text-sm font-bold text-stone-700">新しいドリンクを追加</p>
+          <div>
+            <label className="text-[11px] text-stone-500 tracking-wider">品名</label>
+            <input
+              type="text"
+              value={newDrink.name}
+              onChange={(e) => setNewDrink((s) => ({ ...s, name: e.target.value }))}
+              className="field-input mt-1"
+              placeholder="例: ジン・トニック"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] text-stone-500 tracking-wider">売値（円）</label>
+              <input
+                type="number" inputMode="numeric"
+                value={newDrink.sellPrice}
+                onChange={(e) => setNewDrink((s) => ({ ...s, sellPrice: e.target.value }))}
+                className="field-input field-num mt-1"
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-stone-500 tracking-wider">原価（円）</label>
+              <input
+                type="number" inputMode="numeric"
+                value={newDrink.cost}
+                onChange={(e) => setNewDrink((s) => ({ ...s, cost: e.target.value }))}
+                className="field-input field-num mt-1"
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={() => { setShowAdd(false); setNewDrink({ name: "", sellPrice: "", cost: "" }); }}
+              className="flex-1 py-2.5 rounded-lg text-sm font-medium"
+              style={{ background: "#fff", border: "1px solid var(--line)", color: "var(--muted)" }}
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={submitNew}
+              className="flex-1 py-2.5 rounded-lg text-sm font-bold"
+              style={{ background: "var(--gold)", color: "#1f2a2a" }}
+            >
+              追加
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowAdd(true)}
+          className="w-full py-3 rounded-xl font-bold tracking-wider"
+          style={{
+            background: "#fff", color: "var(--bar)",
+            border: "1px dashed var(--bar)",
+          }}
+        >
+          + 新しいドリンクを追加
+        </button>
+      )}
+
+      <div
+        className="rounded-xl p-4 text-[11px] leading-relaxed"
+        style={{ background: "rgba(201,161,74,0.05)", border: "1px solid rgba(201,161,74,0.15)", color: "#6b5f45" }}
+      >
+        <p>※ 売値は参考表示用です。お支払い計算に使われるのは原価のみです。</p>
+        <p className="mt-1">※ 削除したドリンクの過去の杯数記録は表示されなくなります。価格を変更した場合、過去の記録も新価格で再計算されます。</p>
+      </div>
+    </div>
+  );
+}
+
+function DrinkEditRow({ drink, first, onUpdate, onDelete }) {
+  // ローカルstateで編集 → blur時に保存
+  const [name, setName] = useState(drink.name);
+  const [sellPrice, setSellPrice] = useState(String(drink.sellPrice));
+  const [cost, setCost] = useState(String(drink.cost));
+
+  // 外部更新が来た時に同期
+  useEffect(() => { setName(drink.name); }, [drink.name]);
+  useEffect(() => { setSellPrice(String(drink.sellPrice)); }, [drink.sellPrice]);
+  useEffect(() => { setCost(String(drink.cost)); }, [drink.cost]);
+
+  const saveName = () => {
+    const v = name.trim();
+    if (v && v !== drink.name) onUpdate({ name: v });
+    else if (!v) setName(drink.name);
+  };
+  const saveSell = () => {
+    const v = parseInt(sellPrice) || 0;
+    if (v !== drink.sellPrice) onUpdate({ sellPrice: v });
+  };
+  const saveCost = () => {
+    const v = parseInt(cost) || 0;
+    if (v !== drink.cost) onUpdate({ cost: v });
+  };
+
+  return (
+    <li
+      className="px-3 py-3"
+      style={{ borderTop: first ? "none" : "1px solid var(--line)" }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={saveName}
+          className="field-input flex-1"
+        />
+        <button
+          onClick={onDelete}
+          className="px-2.5 py-2 rounded-lg text-xs font-medium"
+          style={{ background: "#fff", color: "#b04040", border: "1px solid #ecd4d4" }}
+        >
+          削除
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="text-[10px] text-stone-500 tracking-wider">売値（円）</span>
+          <input
+            type="number" inputMode="numeric"
+            value={sellPrice}
+            onChange={(e) => setSellPrice(e.target.value)}
+            onBlur={saveSell}
+            className="field-input field-num mt-0.5"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[10px] text-stone-500 tracking-wider">原価（円）</span>
+          <input
+            type="number" inputMode="numeric"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+            onBlur={saveCost}
+            className="field-input field-num mt-0.5"
+          />
+        </label>
+      </div>
+    </li>
+  );
+}
+
+function SettingsEditRow({ label, value, suffix, onSave, first }) {
+  const [val, setVal] = useState(String(value));
+  useEffect(() => { setVal(String(value)); }, [value]);
+  const save = () => {
+    const v = parseFloat(val);
+    if (isNaN(v) || v < 0) { setVal(String(value)); return; }
+    if (v !== value) onSave(v);
+  };
+  return (
+    <div
+      className="px-4 py-3 flex items-center justify-between"
+      style={{ borderTop: first ? "none" : "1px solid var(--line)" }}
+    >
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number" inputMode="decimal"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={save}
+          className="field-input field-num"
+          style={{ width: "100px" }}
+        />
+        <span className="text-stone-500 text-sm">{suffix}</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Mount
+// ============================================================
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
